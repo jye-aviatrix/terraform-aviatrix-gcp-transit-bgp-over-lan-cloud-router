@@ -26,7 +26,7 @@ resource "google_compute_router" "edge_vpc_subnet_cloud_routers" {
   bgp {
     asn               = each.value.cr_asn
     advertise_mode    = "CUSTOM"
-    advertised_groups = ["ALL_SUBNETS"]
+    advertised_groups = [""]
     dynamic "advertised_ip_ranges" {
       for_each = each.value.advertised_ip_ranges
       content {
