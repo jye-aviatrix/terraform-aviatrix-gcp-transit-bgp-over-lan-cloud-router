@@ -77,12 +77,12 @@ resource "google_compute_global_address" "private_service_connection_ip_range" {
 resource "google_service_networking_connection" "psc_generic" {
   network                 = google_compute_network.edge_vpc.id
   service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [for k,v in google_compute_global_address.private_service_connection_ip_range: v.name]
+  reserved_peering_ranges = [for k, v in google_compute_global_address.private_service_connection_ip_range : v.name]
 }
 
 # Make sure the VPC peering with the Private Service Connection will export custom route
 resource "google_compute_network_peering_routes_config" "private_service_access_generic" {
-  
+
 
   project = var.project
   peering = google_service_networking_connection.psc_generic.peering
@@ -94,3 +94,54 @@ resource "google_compute_network_peering_routes_config" "private_service_access_
 }
 
 
+# Build Aviatrix Transit
+module "mc-transit" {
+  for_each               = var.regional_config
+  source                 = "terraform-aviatrix-modules/mc-transit/aviatrix"
+  version                = "2.4.1" # Lookup module version to controller version mapping: https://registry.terraform.io/modules/terraform-aviatrix-modules/mc-transit/aviatrix/latest
+  cloud                  = "GCP"
+  region                 = each.key
+  cidr                   = each.value.aviatrix_transit_vpc_subnet_ip_cidr_range
+  account                = var.account
+  enable_bgp_over_lan    = true
+  enable_transit_firenet = false
+  name                   = each.value.aviatrix_transit_vpc_name
+  gw_name                = each.value.aviatrix_transit_gateway_name
+  bgp_lan_interfaces = [{
+    vpc_id = google_compute_network.edge_vpc.name
+    subnet = each.value.edge_vpc_subnet_ip_cidr_range
+  }]
+  ha_bgp_lan_interfaces = [{
+    vpc_id = google_compute_network.edge_vpc.name
+    subnet = each.value.edge_vpc_subnet_ip_cidr_range
+  }]
+  local_as_number = each.value.avx_transit_asn
+}
+
+# Create NCC hub
+resource "google_network_connectivity_hub" "gcc_ncc_hub" {
+  for_each = var.regional_config
+  project  = var.project
+  name     = "${each.value.aviatrix_transit_vpc_name}-ncc-hub"
+}
+
+# Create NCC spoke and associate with hub
+
+resource "google_network_connectivity_spoke" "gcp_ncc_spoke" {
+  for_each = var.regional_config
+  project  = var.project
+  name     = "${each.value.aviatrix_transit_vpc_name}-ncc-spoke"
+  location = each.key
+  hub      = google_network_connectivity_hub.gcc_ncc_hub[each.key].id
+  linked_router_appliance_instances {
+    instances {
+        virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+        ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+    }
+    instances {
+        virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+        ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+    }
+    site_to_site_data_transfer = true
+  }
+}

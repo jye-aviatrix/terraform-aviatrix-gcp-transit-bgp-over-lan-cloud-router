@@ -4,7 +4,7 @@ variable "project" {
 }
 
 variable "edge_vpc_name" {
-  description = "Provide Edge VPC name"
+  description = "Provide Edge Global VPC name, note this VPC will have subnets from multiple regions, mapping to Global Cloud Service regions, such as Cloud SQL instance regions"
   type        = string
 }
 
@@ -12,12 +12,14 @@ variable "regional_config" {
   description = "Provide regional configuration"
   type        = map(any)
   default = {
-    us-central1 = { # key name: region where the Global Service is deployed. If Cloud SQL will be deployed in us-centra1 and us-west2, then you will need to list both in the map
+    us-central1 = { # key name: region where the Global Service are deployed. If Cloud SQL will be deployed in us-centra1 and us-west2, then you will need to list both in the map
 
       edge_vpc_subnet_ip_cidr_range = "10.0.2.0/24" # Provide edge VPC subnet CIDR range for the first region
       cr_asn                        = 65201         # Each Cloud Router need it's unique ASN number
 
-      aviatrix_transit_vpc_subnet_ip_cidr_range = "10.16.1.0/24" # Provide Aviatrix Transit VPC subnet CIDR range
+      aviatrix_transit_vpc_name                 = "gcp-transit-us-central1" # Provide Aviatrix Transit VPC name, note: Aviatrix Transit is regional.
+      aviatrix_transit_vpc_subnet_ip_cidr_range = "10.16.1.0/24"            # Provide Aviatrix Transit VPC subnet CIDR range
+      aviatrix_transit_gateway_name             = "gcp-transit-us-central1-gw"
       avx_transit_asn                           = 65301
 
       # must provide proper IPv4 CIDR notatiion in the format of nn.nn.nn.nn/nn
@@ -27,10 +29,18 @@ variable "regional_config" {
       edge_vpc_subnet_ip_cidr_range = "10.0.3.0/24" # Provide edge VPC subnet CIDR range for the second region
       cr_asn                        = 65202
 
+      aviatrix_transit_vpc_name                 = "gcp-transit-us-west2"
       aviatrix_transit_vpc_subnet_ip_cidr_range = "10.16.2.0/24" # Provide Aviatrix Transit VPC subnet CIDR range
+      aviatrix_transit_gateway_name             = "gcp-transit-us-west2-gw"
       avx_transit_asn                           = 65302
 
       private_service_connection_ip_range = "10.0.102.0/24"
     }
   }
+}
+
+
+variable "account" {
+  description = "Provide Aviatrix GCP Access Account name"
+  type        = string
 }
