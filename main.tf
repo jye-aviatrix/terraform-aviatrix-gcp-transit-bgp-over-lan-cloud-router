@@ -8,20 +8,20 @@ resource "google_compute_network" "edge_vpc" {
 
 # Create subnets for Edge VPC, each subnet map to a region.
 resource "google_compute_subnetwork" "edge_vpc_subnets" {
-  for_each      = var.edge_vpc_subnets
+  for_each      = var.regional_config
   project       = var.project
-  region        = each.value.region
-  name          = each.key
-  ip_cidr_range = each.value.ip_cidr_range
+  region        = each.key
+  name          = "${var.edge_vpc_name}-subnet-${each.key}"
+  ip_cidr_range = each.value.edge_vpc_subnet_ip_cidr_range
   network       = google_compute_network.edge_vpc.id
 }
 
 # Create cloud routers per subnet per region.
 resource "google_compute_router" "edge_vpc_subnet_cloud_routers" {
-  for_each = var.edge_vpc_subnets
+  for_each = var.regional_config
   project  = var.project
-  region   = each.value.region
-  name     = "${each.key}-cr"
+  region   = each.key
+  name     = "${var.edge_vpc_name}-cr-${each.key}"
   network  = google_compute_network.edge_vpc.name
   bgp {
     asn               = each.value.cr_asn
@@ -39,42 +39,42 @@ resource "google_compute_router" "edge_vpc_subnet_cloud_routers" {
 
 # Provsion the first interface of CR
 resource "google_compute_router_interface" "cr_interface_1" {
-  for_each           = var.edge_vpc_subnets
+  for_each           = var.regional_config
   project            = var.project
-  region             = each.value.region
-  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-1"
+  region             = each.key
+  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-interface-1"
   router             = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
   subnetwork         = google_compute_subnetwork.edge_vpc_subnets[each.key].id
-  private_ip_address = cidrhost(each.value.ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.ip_cidr_range)[1]))) - 4))
+  private_ip_address = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 4))
 }
+
 # Provsion the second interface of CR
 resource "google_compute_router_interface" "cr_interface_2" {
-  for_each           = var.edge_vpc_subnets
+  for_each           = var.regional_config
   project            = var.project
-  region             = each.value.region
-  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-2"
+  region             = each.key
+  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-interface-2"
   router             = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
   subnetwork         = google_compute_subnetwork.edge_vpc_subnets[each.key].id
-  private_ip_address = cidrhost(each.value.ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.ip_cidr_range)[1]))) - 3))
+  private_ip_address = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 3))
 }
 
 
 # Private Service Connection IP Range allocations
 resource "google_compute_global_address" "private_service_connection_ip_range" {
-  for_each      = var.edge_vpc_subnets
+  for_each      = var.regional_config
   project       = var.project
-  name          = "${var.edge_vpc_name}-psc-${each.value.region}"
+  name          = "${var.edge_vpc_name}-psc-${each.key}"
   address_type  = "INTERNAL"
   purpose       = "VPC_PEERING"
   network       = google_compute_network.edge_vpc.id
   ip_version    = "IPV4"
   address       = split("/", each.value.private_service_connection_ip_range)[0]
   prefix_length = tonumber(split("/", each.value.private_service_connection_ip_range)[1])
-  # address       = each.value.private_service_connection_ip_range
 }
 
 # Equivlent to VPC -> Private Service Connection -> Private Connections to Services -> Select Google Cloud Platform as Connected service producer, and check allocated IP ranges.
-resource "google_service_networking_connection" "default" {
+resource "google_service_networking_connection" "psc_generic" {
   network                 = google_compute_network.edge_vpc.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [for k,v in google_compute_global_address.private_service_connection_ip_range: v.name]
@@ -85,7 +85,7 @@ resource "google_compute_network_peering_routes_config" "private_service_access_
   
 
   project = var.project
-  peering = google_service_networking_connection.default.peering
+  peering = google_service_networking_connection.psc_generic.peering
   network = google_compute_network.edge_vpc.name
 
   import_custom_routes = false
