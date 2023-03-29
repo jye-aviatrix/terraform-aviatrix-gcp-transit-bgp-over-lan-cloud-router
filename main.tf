@@ -172,49 +172,73 @@ resource "google_network_connectivity_spoke" "gcp_ncc_spoke" {
 
 # Configure four Cloud Router BGP peers between with Cloud Router primary/redundant interfaces with Aviatrix Primary/HA Transit Gateways in NCC
 resource "google_compute_router_peer" "cr_primary_int_peer_with_primary_gw" {
-  for_each        = var.regional_config
-  project         = var.project
-  name            = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
-  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  region          = each.key
-  peer_ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
-  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
-  interface       = google_compute_router_interface.cr_primary_interface[each.key].name
+  for_each                  = var.regional_config
+  project                   = var.project
+  name                      = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
+  router                    = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region                    = each.key
+  peer_ip_address           = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+  peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface                 = google_compute_router_interface.cr_primary_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
 }
 
 resource "google_compute_router_peer" "cr_primary_int_peer_with_ha_gw" {
-  for_each        = var.regional_config
-  project         = var.project
-  name            = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
-  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  region          = each.key
-  peer_ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
-  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
-  interface       = google_compute_router_interface.cr_primary_interface[each.key].name
+  for_each                  = var.regional_config
+  project                   = var.project
+  name                      = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  router                    = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region                    = each.key
+  peer_ip_address           = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+  peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface                 = google_compute_router_interface.cr_primary_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
 }
 
 resource "google_compute_router_peer" "cr_redundant_int_peer_with_primary_gw" {
-  for_each        = var.regional_config
-  project         = var.project
-  name            = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
-  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  region          = each.key
-  peer_ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
-  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
-  interface       = google_compute_router_interface.cr_redundant_interface[each.key].name
+  for_each                  = var.regional_config
+  project                   = var.project
+  name                      = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
+  router                    = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region                    = each.key
+  peer_ip_address           = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+  peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface                 = google_compute_router_interface.cr_redundant_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
 }
 
 resource "google_compute_router_peer" "cr_redundant_int_peer_with_ha_gw" {
-  for_each        = var.regional_config
-  project         = var.project
-  name            = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
-  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  region          = each.key
-  peer_ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
-  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
-  interface       = google_compute_router_interface.cr_redundant_interface[each.key].name
+  for_each                  = var.regional_config
+  project                   = var.project
+  name                      = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  router                    = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region                    = each.key
+  peer_ip_address           = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+  peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface                 = google_compute_router_interface.cr_redundant_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+}
+
+
+# Create an Aviatrix Transit External Device Connection to establish BGP over LAN towards Cloud Router
+resource "aviatrix_transit_external_device_conn" "bgp_over_lan" {
+  for_each                  = var.regional_config
+  vpc_id                    = module.mc-transit[each.key].transit_gateway.vpc_id
+  connection_name           = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  connection_type           = "bgp"
+  tunnel_protocol          = "LAN"
+  ha_enabled                = true
+  enable_bgp_lan_activemesh = true
+
+  gw_name                   = module.mc-transit[each.key].transit_gateway.gw_name
+
+
+  bgp_local_as_num         = module.mc-transit[each.key].transit_gateway.local_as_number
+  bgp_remote_as_num        = each.value.cr_asn
+  remote_lan_ip            = google_compute_router_interface.cr_primary_interface[each.key].private_ip_address
+  local_lan_ip             = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+
+  backup_bgp_remote_as_num = each.value.cr_asn
+  backup_remote_lan_ip     = google_compute_router_interface.cr_redundant_interface[each.key].private_ip_address
+  backup_local_lan_ip      = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
 }
