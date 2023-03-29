@@ -141,6 +141,87 @@ module "mc-transit" {
   local_as_number = each.value.avx_transit_asn
 }
 
+# Create Aviatrix Spoke VPC and Gateways, then attach to correponding transits
+module "mc-spoke" {
+  for_each   = var.regional_config
+  source     = "terraform-aviatrix-modules/mc-spoke/aviatrix"
+  version    = "1.5.0" # Lookup module version to controller version mapping: https://registry.terraform.io/modules/terraform-aviatrix-modules/mc-spoke/aviatrix/latest
+  cloud      = "GCP"
+  region     = each.key
+  cidr       = each.value.aviatrix_spoke_vpc_subnet_ip_cidr_range
+  account    = var.account
+  name       = each.value.aviatrix_spoke_vpc_name
+  gw_name    = each.value.aviatrix_spoke_gateway_name
+  transit_gw = module.mc-transit[each.key].transit_gateway.gw_name
+  ha_gw      = true
+}
+
+
+# Create test VM instances
+resource "google_compute_instance" "vm_public" {
+  for_each     = var.regional_config
+  project      = var.project
+  name         = "gcp-vm-public-${each.key}"
+  machine_type = "n1-standard-1"
+  zone         = module.mc-spoke[each.key].spoke_gateway.vpc_reg
+
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-os-cloud/ubuntu-1804-lts"
+    }
+  }
+
+  network_interface {
+    network    = module.mc-spoke[each.key].vpc.id
+    subnetwork = "https://www.googleapis.com/compute/v1/projects/${var.project}/regions/${each.key}/subnetworks/${module.mc-spoke[each.key].vpc.subnets[0].name}"
+    access_config {} //ephemeral IP
+  }
+
+  tags = ["allow-ssh", "allow-icmp"]
+
+  metadata = {
+    startup-script = <<-EOF
+#!/bin/bash
+sudo apt update
+sudo apt install -y mysql-client
+  EOF
+  }
+
+}
+
+# Firewall rule to allow ssh
+resource "google_compute_firewall" "allow_ssh" {
+  for_each = var.regional_config
+  project  = var.project
+  name     = "${module.mc-spoke[each.key].vpc.subnets[0].name}-allow-ssh"
+  network  = module.mc-spoke[each.key].vpc.id
+
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["allow-ssh"]
+}
+
+resource "google_compute_firewall" "allow_icmp" {
+  for_each = var.regional_config
+  project  = var.project
+  name     = "${module.mc-spoke[each.key].vpc.subnets[0].name}-allow-icmp"
+  network  = module.mc-spoke[each.key].vpc.id
+
+
+  allow {
+    protocol = "icmp"
+  }
+
+
+  source_ranges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+  target_tags   = ["allow-icmp"]
+}
 # Create NCC hub
 resource "google_network_connectivity_hub" "gcc_ncc_hub" {
   for_each = var.regional_config
@@ -226,17 +307,17 @@ resource "aviatrix_transit_external_device_conn" "bgp_over_lan" {
   vpc_id                    = module.mc-transit[each.key].transit_gateway.vpc_id
   connection_name           = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
   connection_type           = "bgp"
-  tunnel_protocol          = "LAN"
+  tunnel_protocol           = "LAN"
   ha_enabled                = true
   enable_bgp_lan_activemesh = true
 
-  gw_name                   = module.mc-transit[each.key].transit_gateway.gw_name
+  gw_name = module.mc-transit[each.key].transit_gateway.gw_name
 
 
-  bgp_local_as_num         = module.mc-transit[each.key].transit_gateway.local_as_number
-  bgp_remote_as_num        = each.value.cr_asn
-  remote_lan_ip            = google_compute_router_interface.cr_primary_interface[each.key].private_ip_address
-  local_lan_ip             = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+  bgp_local_as_num  = module.mc-transit[each.key].transit_gateway.local_as_number
+  bgp_remote_as_num = each.value.cr_asn
+  remote_lan_ip     = google_compute_router_interface.cr_primary_interface[each.key].private_ip_address
+  local_lan_ip      = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
 
   backup_bgp_remote_as_num = each.value.cr_asn
   backup_remote_lan_ip     = google_compute_router_interface.cr_redundant_interface[each.key].private_ip_address
