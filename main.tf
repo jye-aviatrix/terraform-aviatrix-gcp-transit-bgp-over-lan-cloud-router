@@ -37,26 +37,49 @@ resource "google_compute_router" "edge_vpc_subnet_cloud_routers" {
   ]
 }
 
-# Provsion the first interface of CR
-resource "google_compute_router_interface" "cr_interface_1" {
-  for_each           = var.regional_config
-  project            = var.project
-  region             = each.key
-  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-interface-1"
-  router             = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  subnetwork         = google_compute_subnetwork.edge_vpc_subnets[each.key].id
-  private_ip_address = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 4))
+#Provision Cloud Router primary interface address
+resource "google_compute_address" "cr_primary_addr" {
+  for_each     = var.regional_config
+  project      = var.project
+  name         = "${var.edge_vpc_name}-${each.key}-cr-primary-addr"
+  region       = google_compute_subnetwork.edge_vpc_subnets[each.key].region
+  subnetwork   = google_compute_subnetwork.edge_vpc_subnets[each.key].id
+  address_type = "INTERNAL"
+  address      = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 4))
 }
 
-# Provsion the second interface of CR
-resource "google_compute_router_interface" "cr_interface_2" {
+#Provision Cloud Router redundant interface address
+resource "google_compute_address" "cr_redundant_addr" {
+  for_each     = var.regional_config
+  project      = var.project
+  name         = "${var.edge_vpc_name}-${each.key}-cr-redundant-addr"
+  region       = google_compute_subnetwork.edge_vpc_subnets[each.key].region
+  subnetwork   = google_compute_subnetwork.edge_vpc_subnets[each.key].id
+  address_type = "INTERNAL"
+  address      = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 3))
+}
+
+# Create Cloud Router redundant interface first
+resource "google_compute_router_interface" "cr_redundant_interface" {
   for_each           = var.regional_config
   project            = var.project
-  region             = each.key
-  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-interface-2"
+  name               = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-int-redundant"
+  region             = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].region
   router             = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
-  subnetwork         = google_compute_subnetwork.edge_vpc_subnets[each.key].id
-  private_ip_address = cidrhost(each.value.edge_vpc_subnet_ip_cidr_range, (pow(2, (32 - tonumber(split("/", each.value.edge_vpc_subnet_ip_cidr_range)[1]))) - 3))
+  subnetwork         = google_compute_subnetwork.edge_vpc_subnets[each.key].self_link
+  private_ip_address = google_compute_address.cr_redundant_addr[each.key].address
+}
+
+# Create Cloud Router primary interface, note it references the redundant interface
+resource "google_compute_router_interface" "cr_primary_interface" {
+  for_each            = var.regional_config
+  project             = var.project
+  name                = "${google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name}-int-primary"
+  region              = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].region
+  router              = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  subnetwork          = google_compute_subnetwork.edge_vpc_subnets[each.key].self_link
+  private_ip_address  = google_compute_address.cr_primary_addr[each.key].address
+  redundant_interface = google_compute_router_interface.cr_redundant_interface[each.key].name
 }
 
 
@@ -135,13 +158,63 @@ resource "google_network_connectivity_spoke" "gcp_ncc_spoke" {
   hub      = google_network_connectivity_hub.gcc_ncc_hub[each.key].id
   linked_router_appliance_instances {
     instances {
-        virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
-        ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+      virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+      ip_address      = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
     }
     instances {
-        virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
-        ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+      virtual_machine = "https://www.googleapis.com/compute/v1/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+      ip_address      = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
     }
     site_to_site_data_transfer = true
   }
+}
+
+
+# Configure four Cloud Router BGP peers between with Cloud Router primary/redundant interfaces with Aviatrix Primary/HA Transit Gateways in NCC
+resource "google_compute_router_peer" "cr_primary_int_peer_with_primary_gw" {
+  for_each        = var.regional_config
+  project         = var.project
+  name            = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
+  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region          = each.key
+  peer_ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface       = google_compute_router_interface.cr_primary_interface[each.key].name
+  router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+}
+
+resource "google_compute_router_peer" "cr_primary_int_peer_with_ha_gw" {
+  for_each        = var.regional_config
+  project         = var.project
+  name            = "cr-pri-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region          = each.key
+  peer_ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface       = google_compute_router_interface.cr_primary_interface[each.key].name
+  router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+}
+
+resource "google_compute_router_peer" "cr_redundant_int_peer_with_primary_gw" {
+  for_each        = var.regional_config
+  project         = var.project
+  name            = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.gw_name}"
+  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region          = each.key
+  peer_ip_address = module.mc-transit[each.key].transit_gateway.bgp_lan_ip_list[0]
+  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface       = google_compute_router_interface.cr_redundant_interface[each.key].name
+  router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+}
+
+resource "google_compute_router_peer" "cr_redundant_int_peer_with_ha_gw" {
+  for_each        = var.regional_config
+  project         = var.project
+  name            = "cr-red-int-peer-${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  router          = google_compute_router.edge_vpc_subnet_cloud_routers[each.key].name
+  region          = each.key
+  peer_ip_address = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+  peer_asn        = module.mc-transit[each.key].transit_gateway.local_as_number
+  interface       = google_compute_router_interface.cr_redundant_interface[each.key].name
+  router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
 }
