@@ -27,7 +27,7 @@ variable "regional_config" {
       aviatrix_spoke_gateway_name = "gcp-spoke-us-central1-gw"
 
       # must provide proper IPv4 CIDR notatiion in the format of nn.nn.nn.nn/nn
-      private_service_connection_ip_range = "10.0.100.0/24" # This is the range of IP allocated to Gloabl Services such as Cloud SQL. https://cloud.google.com/vpc/docs/configure-private-services-access?#allocating-range. Specify the IP range for this region only.
+      private_service_connection_ip_range = "10.192.0.0/20" # This is the range of IP allocated to Gloabl Services such as Cloud SQL. https://cloud.google.com/vpc/docs/configure-private-services-access?#allocating-range. Specify the IP range for this region only.
     }
     us-west2 = {
       edge_vpc_subnet_ip_cidr_range = "10.0.3.0/24" # Provide edge VPC subnet CIDR range for the second region
@@ -42,7 +42,7 @@ variable "regional_config" {
       aviatrix_spoke_vpc_subnet_ip_cidr_range = "10.128.2.0/24" 
       aviatrix_spoke_gateway_name = "gcp-spoke-us-west2-gw"
 
-      private_service_connection_ip_range = "10.0.102.0/24"
+      private_service_connection_ip_range = "10.192.16.0/20"
     }
   }
 }

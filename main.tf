@@ -96,6 +96,7 @@ resource "google_compute_global_address" "private_service_connection_ip_range" {
   prefix_length = tonumber(split("/", each.value.private_service_connection_ip_range)[1])
 }
 
+
 # Equivlent to VPC -> Private Service Connection -> Private Connections to Services -> Select Google Cloud Platform as Connected service producer, and check allocated IP ranges.
 resource "google_service_networking_connection" "psc_generic" {
   network                 = google_compute_network.edge_vpc.id
@@ -115,6 +116,68 @@ resource "google_compute_network_peering_routes_config" "private_service_access_
   export_custom_routes = true # We change this from the default to export our custom routes
 
 }
+
+# Generate password for MySQL
+resource "random_password" "password" {
+  length           = 16
+  special          = true
+}
+
+
+resource "google_sql_database_instance" "mysql_primary" {
+  project = var.project
+  name             = "mysql-primary-1"
+  region           = [for k, v in google_compute_global_address.private_service_connection_ip_range : k][0]
+  database_version = "MYSQL_8_0"
+  deletion_protection = false
+
+  root_password = random_password.password.result
+
+  depends_on = [google_service_networking_connection.psc_generic]
+
+  settings {
+    tier = "db-n1-standard-1"
+    ip_configuration {
+      ipv4_enabled                                  = false
+      private_network                               = google_compute_network.edge_vpc.id
+      enable_private_path_for_google_cloud_services = false
+      allocated_ip_range = [for k, v in google_compute_global_address.private_service_connection_ip_range : v.name][0]
+    }
+    backup_configuration {  # Backup and binary log required to enable read replica
+      enabled = true
+      binary_log_enabled = true
+    }
+  }
+}
+
+resource "google_sql_user" "sqluser" {
+  project = var.project
+  name     = "sqluser"
+  instance = google_sql_database_instance.mysql_primary.name
+  password = random_password.password.result
+}
+
+resource "google_sql_database_instance" "mysql_read_replica" {
+  project = var.project
+  name             = "mysql-read-replica-1"
+  region           = [for k, v in google_compute_global_address.private_service_connection_ip_range : k][1]
+  database_version = "MYSQL_8_0"
+  deletion_protection = false
+  master_instance_name = google_sql_database_instance.mysql_primary.name
+  instance_type = "READ_REPLICA_INSTANCE"
+
+
+  settings {
+    tier = "db-n1-standard-1"
+    ip_configuration {
+      ipv4_enabled                                  = false
+      private_network                               = google_compute_network.edge_vpc.id
+      enable_private_path_for_google_cloud_services = false
+      allocated_ip_range = [for k, v in google_compute_global_address.private_service_connection_ip_range : v.name][1]
+    }
+  }
+}
+
 
 
 # Build Aviatrix Transit
@@ -262,6 +325,9 @@ resource "google_compute_router_peer" "cr_primary_int_peer_with_primary_gw" {
   peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
   interface                 = google_compute_router_interface.cr_primary_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+  depends_on = [
+    google_network_connectivity_spoke.gcp_ncc_spoke
+  ]
 }
 
 resource "google_compute_router_peer" "cr_primary_int_peer_with_ha_gw" {
@@ -274,6 +340,9 @@ resource "google_compute_router_peer" "cr_primary_int_peer_with_ha_gw" {
   peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
   interface                 = google_compute_router_interface.cr_primary_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  depends_on = [
+    google_network_connectivity_spoke.gcp_ncc_spoke
+  ]
 }
 
 resource "google_compute_router_peer" "cr_redundant_int_peer_with_primary_gw" {
@@ -286,6 +355,9 @@ resource "google_compute_router_peer" "cr_redundant_int_peer_with_primary_gw" {
   peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
   interface                 = google_compute_router_interface.cr_redundant_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.vpc_reg}/instances/${module.mc-transit[each.key].transit_gateway.gw_name}"
+  depends_on = [
+    google_network_connectivity_spoke.gcp_ncc_spoke
+  ]
 }
 
 resource "google_compute_router_peer" "cr_redundant_int_peer_with_ha_gw" {
@@ -298,6 +370,9 @@ resource "google_compute_router_peer" "cr_redundant_int_peer_with_ha_gw" {
   peer_asn                  = module.mc-transit[each.key].transit_gateway.local_as_number
   interface                 = google_compute_router_interface.cr_redundant_interface[each.key].name
   router_appliance_instance = "/projects/${var.project}/zones/${module.mc-transit[each.key].transit_gateway.ha_zone}/instances/${module.mc-transit[each.key].transit_gateway.ha_gw_name}"
+  depends_on = [
+    google_network_connectivity_spoke.gcp_ncc_spoke
+  ]
 }
 
 
@@ -322,4 +397,21 @@ resource "aviatrix_transit_external_device_conn" "bgp_over_lan" {
   backup_bgp_remote_as_num = each.value.cr_asn
   backup_remote_lan_ip     = google_compute_router_interface.cr_redundant_interface[each.key].private_ip_address
   backup_local_lan_ip      = module.mc-transit[each.key].transit_gateway.ha_bgp_lan_ip_list[0]
+}
+
+
+output "public_vm" {
+  value = [for vm in google_compute_instance.vm_public: {name = vm.name, private_ip = vm.network_interface.0.network_ip}]
+}
+
+output "primary_sql" {
+  value = "mysql -u ${google_sql_user.sqluser.name} -h ${google_sql_database_instance.mysql_primary.private_ip_address} -p"
+}
+
+output "read_replica_sql" {
+  value = "mysql -u ${google_sql_user.sqluser.name} -h ${google_sql_database_instance.mysql_read_replica.private_ip_address} -p'"
+}
+
+output "sql_password" {
+  value = nonsensitive(random_password.password.result)
 }
