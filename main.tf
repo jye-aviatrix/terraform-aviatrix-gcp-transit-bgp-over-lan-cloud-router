@@ -230,7 +230,7 @@ resource "google_compute_instance" "vm_public" {
 
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-1804-lts"
+      image = "ubuntu-1804-bionic-v20230324"
     }
   }
 
@@ -243,11 +243,7 @@ resource "google_compute_instance" "vm_public" {
   tags = ["allow-ssh", "allow-icmp"]
 
   metadata = {
-    startup-script = <<-EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y mysql-client
-  EOF
+    startup-script = file("${path.module}/bootstrap.sh")
   }
 
 }
