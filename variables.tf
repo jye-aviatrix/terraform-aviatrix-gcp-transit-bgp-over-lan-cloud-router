@@ -14,7 +14,7 @@ variable "regional_config" {
   default = {
     us-central1 = { # key name: region where the Global Service are deployed. If Cloud SQL will be deployed in us-centra1 and us-west2, then you will need to list both in the map
 
-      edge_vpc_subnet_ip_cidr_range = "10.0.2.0/24" # Provide edge VPC subnet CIDR range for the first region
+      edge_vpc_subnet_ip_cidr_range = "10.0.1.0/24" # Provide edge VPC subnet CIDR range for the first region
       cr_asn                        = 65201         # Each Cloud Router need it's unique ASN number
 
       aviatrix_transit_vpc_name                 = "gcp-transit-us-central1" # Provide Aviatrix Transit VPC name, note: Aviatrix Transit is regional.
@@ -30,7 +30,7 @@ variable "regional_config" {
       private_service_connection_ip_range = "10.192.0.0/20" # This is the range of IP allocated to Gloabl Services such as Cloud SQL. https://cloud.google.com/vpc/docs/configure-private-services-access?#allocating-range. Specify the IP range for this region only.
     }
     us-west2 = {
-      edge_vpc_subnet_ip_cidr_range = "10.0.3.0/24" # Provide edge VPC subnet CIDR range for the second region
+      edge_vpc_subnet_ip_cidr_range = "10.0.2.0/24" # Provide edge VPC subnet CIDR range for the second region
       cr_asn                        = 65202
 
       aviatrix_transit_vpc_name                 = "gcp-transit-us-west2"
