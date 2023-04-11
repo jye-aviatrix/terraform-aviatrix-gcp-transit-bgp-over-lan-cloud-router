@@ -1,10 +1,10 @@
 # terraform-aviatrix-gcp-transit-bgp-over-lan-cloud-router
 - This terraform code will deploy two Aviatrix Spoke and Transits. 
-- Spokes and Transit VPC would only be in a single region
-- A edge-global-vpc will be deployed with subnets in different regions align with cloud SQL
-- Two IP ranges 10.192.0.0/20 and 10.192.16.0 will be allocated on edge-global-vpc to be consumed by Cloud SQL
-- Aviatrix Transit forms full mesh BGP over LAN connection with GCP Cloud Routers deployed in the same region in edge-global-vpc
-- Cloud Router perform custom advertisement of the allocated IP range towards corresponding Aviatrix Transit
+- Each Spoke and Transit VPC would only have one subnet in a single region
+- A psc-global-vpc will be deployed, within this VPC, subnets will be created in different regions align with cloud SQL instance region
+- Two IP ranges 10.192.0.0/20 and 10.192.16.0 will be allocated on psc-global-vpc to be consumed by Cloud SQL. Each IP range will be allocated to Cloud SQL instance in different regions.
+- Aviatrix Transit forms full mesh BGP over LAN connection with GCP Cloud Routers in the same region within psc-global-vpc
+- Cloud Router perform custom advertisement of the allocated IP range match SQL instance in the same region towards corresponding Aviatrix Transit
 - The private service connection export routes received by Cloud Router to GCP managed VPC for Cloud SQL
 - A primary and a read replica of Cloud SQL will be deployed aligned with the region of Aviatrix Transit.
 - spoke in us-central1 will only be able to talk to primary SQL instance in us-central1
