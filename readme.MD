@@ -15,7 +15,7 @@
 Blog post: https://cloudlearning365.com/?p=1291
 
 ## Architecture diagram
-![](https://github.com/jye-aviatrix/terraform-aviatrix-gcp-transit-bgp-over-lan-cloud-router/blob/master/GCP%20Cloud%20SQL%20Private%20Access%20with%20Aviatrix%20Transit%20.png?raw=true)
+![](https://raw.githubusercontent.com/jye-aviatrix/terraform-aviatrix-gcp-transit-bgp-over-lan-cloud-router/master/GCP%20Cloud-SQL-Private-Access-with-Aviatrix-Transit.png)
 
 ## Running environment
 ```
