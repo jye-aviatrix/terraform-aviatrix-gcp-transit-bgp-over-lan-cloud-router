@@ -87,7 +87,7 @@ resource "google_compute_router_interface" "cr_primary_interface" {
 resource "google_compute_global_address" "private_service_connection_ip_range" {
   for_each      = var.regional_config
   project       = var.project
-  name          = "${var.psc_vpc_name}-psc-${each.key}"
+  name          = "${var.psc_vpc_name}-managed-${each.key}"
   address_type  = "INTERNAL"
   purpose       = "VPC_PEERING"
   network       = google_compute_network.psc_vpc.id
